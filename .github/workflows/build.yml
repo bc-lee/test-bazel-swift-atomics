@@ -1,0 +1,81 @@
+name: Build
+
+defaults:
+  run:
+    shell: bash -exu {0}
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ['${{ matrix.os }}']
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+        build-tool: [spm, bazel, bazel-alt]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Golang
+        if: contains(matrix.build-tool, 'bazel')
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: false
+
+      - name: Install bazelisk
+        if: contains(matrix.build-tool, 'bazel')
+        run: |
+          go install github.com/bazelbuild/bazelisk@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Install Swift
+        if: contains(matrix.os, 'ubuntu')
+        run: |
+          temp_file=$(mktemp)
+          trap "rm -f $temp_file" EXIT
+          curl -o "$temp_file" -L https://download.swift.org/swift-5.10.1-release/ubuntu2404/swift-5.10.1-RELEASE/swift-5.10.1-RELEASE-ubuntu24.04.tar.gz
+          mkdir -p swift
+          tar -xzf "$temp_file" -C swift --strip-components 1
+          echo "$(pwd)/swift/usr/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        if: contains(matrix.os, 'ubuntu')
+        run: |
+          sudo apt update
+          sudo DEBIAN_FRONTEND=noninteractive apt install -y libsqlite3-0 libncurses6 libxml2 binutils-gold gcc libc6-dev libstdc++-13-dev
+
+      - name: Setup Xcode
+        if: contains(matrix.os, 'macos')
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build (SPM)
+        if: matrix.build-tool == 'spm'
+        run: |
+          swift build -Xlinker -v
+          swift run
+
+      - name: Build (Bazel)
+        if: contains(matrix.build-tool, 'bazel')
+        run: |
+          extra_args=""
+          if [[ "${{ matrix.os }}" == ubuntu* ]] && [[ "${{ matrix.build-tool }}" == "bazel" ]]; then
+            # Without this, final binary will not be linked correctly
+            # See https://github.com/bazelbuild/rules_swift/issues/1059#issuecomment-1595847116
+            # and https://github.com/bazelbuild/rules_swift/blob/b65d9ad5a1bd2dad5d4afa50fd3f5eb2ec54a39c/swift/internal/feature_names.bzl#L315
+            extra_args="--features=swift._force_alwayslink_true"
+          fi
+          target_name="test-bazel-swift-atomics"
+          if [[ "${{ matrix.build-tool }}" == "bazel-alt" ]]; then
+            target_name="test-bazel-swift-atomics-alt"
+          fi
+          CC=clang bazelisk build ${extra_args} //Sources:${target_name}
+          bazel-bin/Sources/${target_name}
