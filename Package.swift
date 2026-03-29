@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
   name: "test-bazel-swift-atomics",
   dependencies: [
-    .package(url: "https://github.com/apple/swift-atomics.git", .upToNextMajor(from: "1.2.0"))
+    .package(url: "https://github.com/apple/swift-atomics.git", .upToNextMajor(from: "1.3.0"))
   ],
   targets: [
     .executableTarget(
